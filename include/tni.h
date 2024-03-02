@@ -30,6 +30,8 @@ typedef enum {
     TNI_ERR_MEM,
     TNI_ERR_FILE,
     TNI_ERR_ISO,
+    TNI_ERR_DIR,
+    TNI_ERR_CB,
 
 } tni_response_t;
 
@@ -147,7 +149,7 @@ typedef bool (*type_func_t)(iso_vol_desc_t *);
 typedef tni_response_t (*gen_func_t)(void **, void *);
 
 
-/**** Callback Return ****/
+/**** API Structures ****/
 
 typedef enum {
 
@@ -157,8 +159,12 @@ typedef enum {
 
 } tni_signal_t;
 
+typedef struct {
 
-/**** Parsing Type ****/
+    tni_signal_t (*fn)(tni_record_t *, void *);
+    void *args;
+
+} imn_callback_t;
 
 typedef enum {
 
@@ -166,8 +172,6 @@ typedef enum {
     TNI_PARSE_JOLIET,
 
 } tni_parse_t;
-
-/**** API Structs ****/
 
 typedef struct tni_extent_s {
 
@@ -187,7 +191,6 @@ typedef enum {
 
 typedef struct tni_record_s {
 
-    struct tni_record_s *parent_dir;
     off_t total_size;
 
     tni_record_type_t type;

@@ -279,7 +279,6 @@ tni_response_t record_generator(void **output, void *raw_state) {
 
             goto exit_normal;
         }
-
     }
 
     if (final_block) {
@@ -310,8 +309,8 @@ tni_response_t record_generator(void **output, void *raw_state) {
 
     state->rel_pos = raw_rec->len_dr[0];
     *output = raw_rec;
-    ret_val = TNI_OK;
 
+    ret_val = TNI_OK;
     exit_normal:
         return ret_val;
 }
@@ -339,7 +338,6 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
         goto exit_normal;
     }
 
-    rec->parent_dir = NULL;
     rec->total_size = LE_int32(&raw_rec->length[0]);
 
     rec->is_hidden = (raw_rec->flags[0] & 0x1);
@@ -455,13 +453,24 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
         return ret_val;
 }
 
+static
+void free_record(tni_record_t *rec) {
+
+    tni_extent_t *t_ext;
+    while (rec->extent_list != NULL) {
+        t_ext = rec->extent_list->link;
+        free(rec->extent_list);
+        rec->extent_list = t_ext;
+    }
+    free(rec->record_id);
+}
+
 
 /**** API Functions ****/
 
 tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
                             bool is_header) {
 
-    // tni_response_t r_val;
     tni_response_t ret_val;
     FILE *iso_file;
     type_func_t t_func;
@@ -520,10 +529,114 @@ tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
     if (ret_val != TNI_OK) {
         goto exit_root;
     }
+
     ret_val = TNI_OK;
+    goto exit_normal;
 
     exit_root:
         free(iso->root_dir);
+    exit_normal:
+        return ret_val;
+}
+
+tni_response_t tni_read_block(void *block, tni_iso_t *iso, uint32_t lba) {
+
+    tni_response_t ret_val;
+
+    ret_val = handle_fseek(iso->file_ptr, lba * iso->block_size, SEEK_SET);
+    if (ret_val != TNI_OK) {
+        goto exit_normal;
+    }
+
+    ret_val = handle_fread(block, iso->block_size, 1, iso->file_ptr);
+    if (ret_val != TNI_OK) {
+        goto exit_normal;
+    }
+
+    ret_val = TNI_OK;
+    exit_normal:
+        return ret_val;
+}
+
+tni_response_t tni_traverse_dir(tni_iso_t *iso, tni_record_t *dir, imn_callback_t *cb) {
+
+    tni_response_t ret_val;
+    tni_signal_t signal;
+
+    record_state_t state;
+    generator_t gen;
+
+    tni_record_t cur_rec;
+    tni_extent_t *cur_extent;
+    off_t local_start, local_end;
+
+    if (iso == NULL || dir == NULL) {
+        ret_val = TNI_ERR_ARGS;
+        goto exit_normal;
+    }
+
+    if (!(dir->is_dir)) {
+        ret_val = TNI_ERR_DIR;
+        goto exit_normal;
+    }
+
+    gen.generate = record_generator;
+    gen.state = &state;
+
+    state.iso = iso;
+    ret_val = handle_alloc(&(state.block), 1, iso->block_size, false);
+    if (ret_val != TNI_OK) {
+        goto exit_normal;
+    }
+
+    cur_extent = dir->extent_list;
+    while (cur_extent != NULL) {
+
+        local_start = state.block_pos * iso->block_size;
+        local_end = local_start + cur_extent->length;
+
+        state.block_pos = cur_extent->lba;
+        state.block_end = local_end / iso->block_size;
+
+        state.rel_pos = 0;
+        state.rel_end = local_end % iso->block_size;
+
+        ret_val = tni_read_block(state.block, iso, cur_extent->lba);
+        if (ret_val != TNI_OK) {
+            goto exit_block;
+        }
+
+        while (true) {
+            ret_val = parse_record(&cur_rec, iso, &gen);
+            if (ret_val == TNI_FAIL) {
+                break;
+            }
+            if (ret_val != TNI_OK) {
+                break;
+            }
+
+            signal = cb->fn(&cur_rec, cb->args);
+            if (signal == TNI_SIGNAL_STOP) {
+                ret_val = TNI_OK;
+                goto exit_record;
+            }
+            if (signal == TNI_SIGNAL_ERR) {
+                ret_val = TNI_ERR_CB;
+                goto exit_record;
+            }
+
+            free_record(&cur_rec);
+        }
+        cur_extent = cur_extent->link;
+    }
+
+    ret_val = TNI_OK;
+    goto exit_normal;
+
+    exit_record:
+        free_record(&cur_rec);
+    exit_block:
+        free(state.block);
     exit_normal:
         return ret_val;
 }
