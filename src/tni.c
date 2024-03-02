@@ -147,13 +147,25 @@ tni_response_t handle_fread(void *buf, size_t size, size_t count, FILE *file) {
 /**** Descriptor Parsing ****/
 
 static
-bool detect_primary(iso_vol_desc_t *desc) {
+bool detect_pvd(iso_vol_desc_t *desc) {
     return desc->vol_desc_type[0] == 1;
 }
 
 static
 bool detect_joliet(iso_vol_desc_t *desc) {
-    bool is_svd = desc->vol_desc_type == 2;
+    if (desc->vol_desc_type[0] == 2) {
+        if (desc->esc_sequences[0] == 0x25) {
+            if (desc->esc_sequences[1] == 0x2f) {
+                switch (desc->esc_sequences[2]) {
+                    case 0x40:
+                    case 0x43:
+                    case 0x45:
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 static
@@ -493,7 +505,7 @@ tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
     switch(parse_type) {
 
         case TNI_PARSE_PRIMARY:
-            t_func = *detect_primary;
+            t_func = *detect_pvd;
             break;
         case TNI_PARSE_JOLIET:
             t_func = *detect_joliet;
@@ -558,6 +570,59 @@ tni_response_t tni_read_block(void *block, tni_iso_t *iso, uint32_t lba) {
         return ret_val;
 }
 
+tni_response_t tni_read_file(void *buf, tni_iso_t *iso, tni_record_t *rec,
+                                off_t rel_pos, size_t size) {
+
+    tni_response_t ret_val;
+    tni_extent_t *cur_extent;
+    off_t cur_pos, read_pos;
+    size_t read_size;
+
+    if (buf == NULL || iso == NULL || rec == NULL) {
+        ret_val = TNI_ERR_ARGS;
+        goto exit_normal;
+    }
+
+    cur_pos = 0;
+    cur_extent = rec->extent_list;
+    while (size != 0) {
+
+        if (cur_extent == NULL) {
+            ret_val == TNI_FAIL;
+            goto exit_normal;
+        }
+
+        if (cur_pos + cur_extent->length > rel_pos) {
+            read_size = cur_extent->length - (rel_pos - cur_pos);
+            read_pos = (cur_extent->lba * iso->block_size) + (rel_pos - cur_pos);
+            
+            if (size < read_size) {
+                read_size = size;
+                size = 0;
+            } else {
+                size -= read_size;
+            }
+
+            ret_val = handle_fseek(iso->file_ptr, read_pos, SEEK_SET);
+            if (ret_val != TNI_OK) {
+                goto exit_normal;
+            }
+
+            ret_val = handle_fread(buf, 1, read_size, iso->file_ptr);
+            if (ret_val != TNI_OK) {
+                goto exit_normal;
+            }
+        }
+
+        buf += read_size;
+        cur_pos += cur_extent->length;
+    }
+
+    ret_val = TNI_OK;
+    exit_normal:
+        return ret_val;
+}
+
 tni_response_t tni_traverse_dir(tni_iso_t *iso, tni_record_t *dir, imn_callback_t *cb) {
 
     tni_response_t ret_val;
@@ -612,7 +677,7 @@ tni_response_t tni_traverse_dir(tni_iso_t *iso, tni_record_t *dir, imn_callback_
                 break;
             }
             if (ret_val != TNI_OK) {
-                break;
+                goto exit_normal;
             }
 
             signal = cb->fn(&cur_rec, cb->args);
