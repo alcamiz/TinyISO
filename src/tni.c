@@ -623,7 +623,7 @@ tni_response_t tni_read_file(void *buf, tni_iso_t *iso, tni_record_t *rec,
         return ret_val;
 }
 
-tni_response_t tni_traverse_dir(tni_iso_t *iso, tni_record_t *dir, imn_callback_t *cb) {
+tni_response_t tni_traverse_dir(tni_iso_t *iso, tni_record_t *dir, tni_callback_t *cb) {
 
     tni_response_t ret_val;
     tni_signal_t signal;

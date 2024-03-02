@@ -164,7 +164,7 @@ typedef struct {
     tni_signal_t (*fn)(tni_record_t *, void *);
     void *args;
 
-} imn_callback_t;
+} tni_callback_t;
 
 typedef enum {
 
@@ -217,5 +217,13 @@ typedef struct {
     tni_record_t *root_dir;
 
 } tni_iso_t;
+
+
+/**** API Functions ****/
+
+tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type, bool is_header);
+tni_response_t tni_read_file(void *buf, tni_iso_t *iso, tni_record_t *rec, off_t rel_pos, size_t size);
+tni_response_t tni_read_block(void *block, tni_iso_t *iso, uint32_t lba);
+tni_response_t tni_traverse_dir(tni_iso_t *iso, tni_record_t *dir, tni_callback_t *cb);
 
 #endif
