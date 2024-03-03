@@ -38,7 +38,7 @@ uint64_t LE_int64(uint8_t *iso_num) {
 
 static
 tni_response_t handle_iconv(char *from_code, char *to_code,
-                            char *from_buff, size_t *from_space,
+                            char *from_buff, size_t from_space,
                             char *to_buff, size_t *to_space) {
 
     tni_response_t ret_val;
@@ -51,7 +51,7 @@ tni_response_t handle_iconv(char *from_code, char *to_code,
         goto exit_normal;
     }
 
-    iconv_ret = iconv(id_transform, &from_buff, from_space,
+    iconv_ret = iconv(id_transform, &from_buff, &from_space,
                         &to_buff, to_space);
     if (iconv_ret < 0) {
         ret_val = TNI_ERROR;
@@ -212,7 +212,7 @@ tni_response_t search_desc(iso_vol_desc_t *desc, FILE *file_ptr,
             goto exit_normal;
         }
 
-        if (desc->vol_desc_type == SECTOR_TAIL) {
+        if (desc->vol_desc_type[0] == SECTOR_TAIL) {
             ret_val = TNI_FAIL;
             goto exit_normal;
         }
@@ -268,12 +268,18 @@ tni_response_t record_generator(void **output, void *raw_state) {
 
     state = (record_state_t *) raw_state;
     iso = state->iso;
-    final_block = state->block_pos == state->block_end;
 
+    if (state->block_pos >= state->block_end) {
+        ret_val = TNI_FAIL;
+        goto exit_normal;
+    }
+
+    final_block = state->block_pos == state->block_end - 1;
     t_end = (final_block)? state->rel_end : iso->block_size;
+
     if (state->rel_pos < t_end - sizeof(iso_dir_record_t)) {
 
-        raw_rec = (tni_record_t *) (state->block + state->rel_pos);
+        raw_rec = (iso_dir_record_t *) (state->block + state->rel_pos);
         is_rec = raw_rec->len_dr[0] != 0;
         iso_valid = state->rel_pos + raw_rec->len_dr[0] <= iso->block_size;
 
@@ -288,16 +294,16 @@ tni_response_t record_generator(void **output, void *raw_state) {
                 ret_val = TNI_ERR_ISO;
                 goto exit_normal;
             }
-
             goto exit_normal;
         }
     }
+    state->block_pos += 1;
 
     if (final_block) {
+        state->rel_pos = state->rel_end;
         ret_val = TNI_FAIL;
+        goto exit_normal;
     }
-
-    state->block_pos += 1;
 
     ret_val = handle_fseek(iso->file_ptr,
                             state->block_pos * iso->block_size, SEEK_SET);
@@ -310,12 +316,12 @@ tni_response_t record_generator(void **output, void *raw_state) {
         goto exit_normal;
     }
 
-    raw_rec = (tni_record_t *) state->block;
+    raw_rec = (iso_dir_record_t *) state->block;
     if (raw_rec->len_dr[0] == 0) {
         ret_val = TNI_FAIL;
     }
 
-    if (raw_rec->len_dr > iso->block_size) {
+    if (raw_rec->len_dr[0] > iso->block_size) {
         ret_val = TNI_ERR_ISO;
     }
 
@@ -345,7 +351,7 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
         goto exit_normal;
     }
 
-    ret_val = run_generator(&raw_rec, d_gen);
+    ret_val = run_generator((void **) &raw_rec, d_gen);
     if (ret_val != 0) {
         goto exit_normal;
     }
@@ -358,13 +364,21 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
     ucs_len = (size_t) raw_rec->len_fi[0];
     ucs_name = (char *) (((void *) raw_rec) + sizeof(iso_dir_record_t));
 
+    if (!rec->is_dir) {
+        if (ucs_len < 4 || ucs_name[ucs_len - 3] != ';') {
+            ret_val = TNI_ERR_ISO;
+            goto exit_normal;
+        }
+        ucs_len -= 4;
+    }
+
     utf8_len = (ucs_len * 3) / 2;
-    ret_val = handle_alloc(&utf8_name, utf8_len + 2, 1, true);
+    ret_val = handle_alloc((void **) &utf8_name, utf8_len + 2, 1, true);
     if (ret_val != TNI_OK) {
         goto exit_normal;
     }
 
-    if (ucs_name[0] <= 1) {
+    if (ucs_len == 1 && ucs_name[0] <= 1) {
 
         switch(ucs_name[0]) {
             case '\0':
@@ -388,7 +402,7 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
         }
 
         ret_val = handle_iconv(encoding, "UTF-8",
-                                ucs_name, &ucs_len,
+                                ucs_name, ucs_len,
                                 utf8_name, &utf8_len);
         if (ret_val != TNI_OK) {
             goto exit_id;
@@ -399,7 +413,7 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
     }
     rec->record_id = utf8_name;
 
-    ret_val = handle_alloc(&(rec->extent_list), 1,
+    ret_val = handle_alloc((void **) &(rec->extent_list), 1,
                                 sizeof(tni_extent_t), false);
     if (ret_val != TNI_OK) {
         goto exit_id;
@@ -417,7 +431,7 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
     multi_extent = raw_rec->flags[0] & EXTENT_FLAG;
     while (multi_extent) {
 
-        ret_val = run_generator(&raw_rec, d_gen);
+        ret_val = run_generator((void **) &raw_rec, d_gen);
         if (ret_val == TNI_FAIL) {
             ret_val = TNI_ERR_ISO;
             goto exit_extent;
@@ -426,7 +440,7 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
             goto exit_extent;
         }
 
-        ret_val = handle_alloc(&(cur_extent->link), 1,
+        ret_val = handle_alloc((void **) &(cur_extent->link), 1,
                                 sizeof(tni_extent_t), false);
         if (ret_val != TNI_OK) {
             goto exit_extent;
@@ -519,19 +533,19 @@ tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
         goto exit_normal;
     }
 
-    iso->lba_count = LE_int32(&(desc.vol_space_size));
-    iso->block_size = LE_int16(&(desc.block_size));
+    iso->lba_count = LE_int32(&(desc.vol_space_size[0]));
+    iso->block_size = LE_int16(&(desc.block_size[0]));
     iso->parse_type = parse_type;
     iso->is_header = is_header;
     iso->file_ptr = iso_file;
 
-    ret_val = handle_alloc(&(iso->root_dir), 1, 
+    ret_val = handle_alloc((void **) &(iso->root_dir), 1, 
                             sizeof(iso_dir_record_t), false);
     if (ret_val != TNI_OK) {
         goto exit_normal;
     }
 
-    root_state.root_dir = &(desc.root_dir_record);
+    root_state.root_dir = (iso_dir_record_t *) &(desc.root_dir_record[0]);
     root_state.parsed = false;
 
     d_gen.generate = single_generator;
@@ -588,7 +602,7 @@ tni_response_t tni_read_file(void *buf, tni_iso_t *iso, tni_record_t *rec,
     while (size != 0) {
 
         if (cur_extent == NULL) {
-            ret_val == TNI_FAIL;
+            ret_val = TNI_FAIL;
             goto exit_normal;
         }
 
@@ -657,11 +671,11 @@ tni_response_t tni_traverse_dir(tni_iso_t *iso, tni_record_t *dir, tni_callback_
     cur_extent = dir->extent_list;
     while (cur_extent != NULL) {
 
-        local_start = state.block_pos * iso->block_size;
+        local_start = cur_extent->lba * iso->block_size;
         local_end = local_start + cur_extent->length;
 
         state.block_pos = cur_extent->lba;
-        state.block_end = local_end / iso->block_size;
+        state.block_end = (local_end + iso->block_size - 1) / iso->block_size;
 
         state.rel_pos = 0;
         state.rel_end = local_end % iso->block_size;

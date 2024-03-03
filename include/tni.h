@@ -90,6 +90,12 @@ typedef struct {
 } iso_dir_record_t;
 
 
+/**** Internal Function Types ****/
+
+typedef bool (*type_func_t)(iso_vol_desc_t *);
+typedef tni_response_t (*gen_func_t)(void **, void *);
+
+
 /**** Internal Structs ****/
 
 typedef struct {
@@ -115,56 +121,7 @@ typedef struct {
 } string_t;
 
 
-/**** Generator Structs ****/
-
-typedef struct {
-
-    iso_dir_record_t *root_dir;
-    bool parsed;
-
-} single_state_t;
-
-typedef struct {
-
-    tni_iso_t *iso;
-
-    off_t block_pos, block_end;
-    off_t rel_pos, rel_end;
-
-    void *block;
-
-} record_state_t;
-
-typedef struct {
-
-    gen_func_t generate;
-    void *state;
-
-} generator_t;
-
-
-/**** Internal Function Types ****/
-
-typedef bool (*type_func_t)(iso_vol_desc_t *);
-typedef tni_response_t (*gen_func_t)(void **, void *);
-
-
 /**** API Structures ****/
-
-typedef enum {
-
-    TNI_SIGNAL_OK,
-    TNI_SIGNAL_STOP,
-    TNI_SIGNAL_ERR,
-
-} tni_signal_t;
-
-typedef struct {
-
-    tni_signal_t (*fn)(tni_record_t *, void *);
-    void *args;
-
-} tni_callback_t;
 
 typedef enum {
 
@@ -206,6 +163,21 @@ typedef struct tni_record_s {
 
 } tni_record_t;
 
+typedef enum {
+
+    TNI_SIGNAL_OK,
+    TNI_SIGNAL_STOP,
+    TNI_SIGNAL_ERR,
+
+} tni_signal_t;
+
+typedef struct {
+
+    tni_signal_t (*fn)(tni_record_t *, void *);
+    void *args;
+
+} tni_callback_t;
+
 typedef struct {
 
     uint32_t lba_count;
@@ -217,6 +189,34 @@ typedef struct {
     tni_record_t *root_dir;
 
 } tni_iso_t;
+
+
+/**** Generator Structs ****/
+
+typedef struct {
+
+    iso_dir_record_t *root_dir;
+    bool parsed;
+
+} single_state_t;
+
+typedef struct {
+
+    tni_iso_t *iso;
+
+    off_t block_pos, block_end;
+    off_t rel_pos, rel_end;
+
+    void *block;
+
+} record_state_t;
+
+typedef struct {
+
+    gen_func_t generate;
+    void *state;
+
+} generator_t;
 
 
 /**** API Functions ****/

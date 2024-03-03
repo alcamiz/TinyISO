@@ -9,6 +9,7 @@
 typedef struct {
     char *path;
     int idx;
+    tni_iso_t *iso;
 } arg_t;
 
 tni_signal_t traverse_cb(tni_record_t *rec, void *raw_arg) {
@@ -30,18 +31,26 @@ tni_signal_t traverse_cb(tni_record_t *rec, void *raw_arg) {
         }
 
         memcpy(args->path + args->idx, rec->record_id, rec->id_length);
-        args->idx += rec->id_length;
-        args->path[args->idx] = '\0';
 
         if (rec->is_dir) {
 
-            args->path[args->idx] = '/';
-            args->path[args->idx + 1] = '\0';
+            args->idx += rec->id_length + 1;
+            args->path[args->idx - 1] = '/';
+            args->path[args->idx] = '\0';
 
             cb.fn = traverse_cb;
             cb.args = raw_arg;
 
+            ret_val = tni_traverse_dir(args->iso, rec, &cb);
+            if (ret_val != TNI_OK) {
+                return TNI_SIGNAL_ERR;
+            }
+
+            args->idx -= rec->id_length + 1;
+            args->path[args->idx] = '\0';
+
         } else {
+            args->path[args->idx + rec->id_length] = '\0';
             printf("%s\n", args->path);
         }
     }
@@ -75,6 +84,7 @@ int main(int argc, char *argv[]) {
 
     args.path = path;
     args.idx = 0;
+    args.iso = &iso;
 
     cb.fn = traverse_cb;
     cb.args = (void *) &args;
