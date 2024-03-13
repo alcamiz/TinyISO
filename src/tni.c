@@ -340,6 +340,7 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
     iso_dir_record_t *raw_rec;
     bool multi_extent;
     tni_extent_t *cur_extent, *t_ext;
+    int ext_len;
 
     off_t local_start, local_end;
     char *ucs_name, *utf8_name;
@@ -364,12 +365,20 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
     ucs_len = (size_t) raw_rec->len_fi[0];
     ucs_name = (char *) (((void *) raw_rec) + sizeof(iso_dir_record_t));
 
+    if (iso->parse_type == TNI_PARSE_PVD) {
+        ext_len = 2;
+        encoding = "ASCII";
+    } else if (iso->parse_type == TNI_PARSE_JOLIET) {
+        ext_len = 4;
+        encoding = "UCS-2BE";
+    }
+
     if (!rec->is_dir) {
-        if (ucs_len < 4 || ucs_name[ucs_len - 3] != ';') {
+        if (ucs_len < ext_len || ucs_name[ucs_len - (ext_len / 2) - 1] != ';') {
             ret_val = TNI_ERR_ISO;
             goto exit_normal;
         }
-        ucs_len -= 4;
+        ucs_len -= ext_len;
     }
 
     utf8_len = (ucs_len * 3) / 2;
@@ -394,12 +403,6 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
                 break;
         }
     } else {
-
-        if (iso->parse_type == TNI_PARSE_PRIMARY) {
-            encoding = "ASCII";
-        } else if (iso->parse_type == TNI_PARSE_JOLIET) {
-            encoding = "UCS-2BE";
-        }
 
         ret_val = handle_iconv(encoding, "UTF-8",
                                 ucs_name, ucs_len,
@@ -518,7 +521,7 @@ tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
 
     switch(parse_type) {
 
-        case TNI_PARSE_PRIMARY:
+        case TNI_PARSE_PVD:
             t_func = *detect_pvd;
             break;
         case TNI_PARSE_JOLIET:

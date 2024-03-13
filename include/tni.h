@@ -125,7 +125,7 @@ typedef struct {
 
 typedef enum {
 
-    TNI_PARSE_PRIMARY,
+    TNI_PARSE_PVD,
     TNI_PARSE_JOLIET,
 
 } tni_parse_t;
