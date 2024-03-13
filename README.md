@@ -28,8 +28,8 @@ gcc and libiconv must be installed. Compliling on Windows
 may require Cygwin or MSYS2.
 
 ```
-git clone https://github.com/alcamiz/tinyIso
-cd tinyIso
+git clone https://github.com/alcamiz/TinyIso
+cd TinyIso
 make test-iter
 ```
 
