@@ -95,4 +95,7 @@ int main(int argc, char *argv[]) {
         free(path);
         return EXIT_FAILURE;
     }
+
+    tni_close_iso(&iso);
+    return EXIT_SUCCESS;
 }

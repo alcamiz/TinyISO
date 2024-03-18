@@ -17,20 +17,20 @@
 
 static
 uint16_t LE_int16(uint8_t *iso_num) {
-    return ((uint16_t) (iso_num[0] & 0xff) 
-         | ((uint16_t) (iso_num[1] & 0xff) << 8));
+    return (((uint16_t) (iso_num[0] & 0xff))
+         | (((uint16_t) (iso_num[1] & 0xff)) << 8));
 }
 
 static
 uint32_t LE_int32(uint8_t *iso_num) {
-    return ((uint32_t) (LE_int16(iso_num))
-         | ((uint32_t) (LE_int16(iso_num + 2))) << 16);
+    return (((uint32_t) (LE_int16(iso_num)))
+         | (((uint32_t) (LE_int16(iso_num + 2))) << 16));
 }
 
 static
 uint64_t LE_int64(uint8_t *iso_num) {
-    return ((uint64_t) (LE_int32(iso_num))
-         | ((uint64_t) (LE_int32(iso_num + 4))) << 32);
+    return (((uint64_t) (LE_int32(iso_num)))
+         | (((uint64_t) (LE_int32(iso_num + 4))) << 32));
 }
 
 
@@ -100,6 +100,23 @@ tni_response_t handle_fopen(FILE **file, char *filename, char *mode) {
     *file = fopen(filename, mode);
 
     if (file == NULL) {
+        ret_val = TNI_ERR_FILE;
+        goto exit_normal;
+    }
+
+    ret_val = TNI_OK;
+    exit_normal:
+        return ret_val;
+}
+
+static
+tni_response_t handle_fclose(FILE *file) {
+
+    tni_response_t ret_val;
+    int close_ret;
+
+    close_ret = fclose(file);
+    if (close_ret != 0) {
         ret_val = TNI_ERR_FILE;
         goto exit_normal;
     }
@@ -343,9 +360,8 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
     int ext_len;
 
     off_t local_start, local_end;
-    char *ucs_name, *utf8_name;
-    size_t ucs_len, utf8_len;
-    char *encoding;
+    char *ucs_name, *utf8_name, *encoding;
+    size_t buff_len, ucs_len, utf8_len;
 
     if (rec == NULL || d_gen == NULL) {
         ret_val = TNI_ERROR;
@@ -357,7 +373,7 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
         goto exit_normal;
     }
 
-    rec->total_size = LE_int32(&raw_rec->length[0]);
+    rec->total_size = LE_int32(raw_rec->length);
 
     rec->is_hidden = (raw_rec->flags[0] & 0x1);
     rec->is_dir = (raw_rec->flags[0] & 0x2);
@@ -381,39 +397,41 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
         ucs_len -= ext_len;
     }
 
-    utf8_len = (ucs_len * 3) / 2;
-    ret_val = handle_alloc((void **) &utf8_name, utf8_len + 2, 1, true);
+    buff_len = (ucs_len * 3) / 2;
+    ret_val = handle_alloc((void **) &utf8_name, buff_len + 1, 1, false);
     if (ret_val != TNI_OK) {
         goto exit_normal;
     }
 
     if (ucs_len == 1 && ucs_name[0] <= 1) {
 
+        utf8_name[0] = '\0';
+        utf8_len = 1;
+
         switch(ucs_name[0]) {
             case '\0':
-                utf8_name[0] = '.';
-                rec->id_length = 1;
                 rec->type = REC_CUR_DIR;
                 break;
             case '\1':
-                utf8_name[0] = '.';
-                utf8_name[1] = '.';
-                rec->id_length = 2;
                 rec->type = REC_PARENT_DIR;
                 break;
         }
+
     } else {
 
         ret_val = handle_iconv(encoding, "UTF-8",
                                 ucs_name, ucs_len,
-                                utf8_name, &utf8_len);
+                                utf8_name, &buff_len);
         if (ret_val != TNI_OK) {
             goto exit_id;
         }
 
         rec->type = REC_NORMAL;
-        rec->id_length = ((ucs_len * 3) / 2) - utf8_len;
+        utf8_len = ((ucs_len * 3) / 2) - buff_len;
     }
+
+    utf8_name[utf8_len] = '\0';
+    rec->id_length = utf8_len;
     rec->record_id = utf8_name;
 
     ret_val = handle_alloc((void **) &(rec->extent_list), 1,
@@ -423,8 +441,8 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
     }
     cur_extent = rec->extent_list;
 
-    cur_extent->lba = LE_int32(&raw_rec->block[0]);
-    cur_extent->length = LE_int32(&raw_rec->length[0]);
+    cur_extent->lba = LE_int32(raw_rec->block);
+    cur_extent->length = LE_int32(raw_rec->length);
     cur_extent->link = NULL;
 
     rec->extent_span.start = cur_extent->lba * iso->block_size;
@@ -450,8 +468,8 @@ tni_response_t parse_record(tni_record_t *rec, tni_iso_t *iso, generator_t *d_ge
         }
 
         cur_extent = cur_extent->link;
-        cur_extent->lba = LE_int32(&raw_rec->block[0]);
-        cur_extent->length = LE_int32(&raw_rec->length[0]);
+        cur_extent->lba = LE_int32(raw_rec->block);
+        cur_extent->length = LE_int32(raw_rec->length);
         cur_extent->link = NULL;
 
         local_start = cur_extent->lba * iso->block_size;
@@ -533,11 +551,11 @@ tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
 
     ret_val = search_desc(&desc, iso_file, t_func);
     if (ret_val != TNI_OK) {
-        goto exit_normal;
+        goto exit_file;
     }
 
-    iso->lba_count = LE_int32(&(desc.vol_space_size[0]));
-    iso->block_size = LE_int16(&(desc.block_size[0]));
+    iso->lba_count = LE_int32(desc.vol_space_size);
+    iso->block_size = LE_int16(desc.block_size);
     iso->parse_type = parse_type;
     iso->is_header = is_header;
     iso->file_ptr = iso_file;
@@ -545,10 +563,10 @@ tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
     ret_val = handle_alloc((void **) &(iso->root_dir), 1, 
                             sizeof(iso_dir_record_t), false);
     if (ret_val != TNI_OK) {
-        goto exit_normal;
+        goto exit_file;
     }
 
-    root_state.root_dir = (iso_dir_record_t *) &(desc.root_dir_record[0]);
+    root_state.root_dir = (iso_dir_record_t *) desc.root_dir_record;
     root_state.parsed = false;
 
     d_gen.generate = single_generator;
@@ -564,6 +582,22 @@ tni_response_t tni_open_iso(tni_iso_t *iso, char *path, tni_parse_t parse_type,
 
     exit_root:
         free(iso->root_dir);
+    exit_file:
+        handle_fclose(iso_file);
+    exit_normal:
+        return ret_val;
+}
+
+tni_response_t tni_close_iso(tni_iso_t *iso) {
+
+    tni_response_t ret_val;
+
+    ret_val = handle_fclose(iso->file_ptr);
+    if (ret_val != TNI_OK) {
+        goto exit_normal;
+    }
+    free_record(iso->root_dir);
+
     exit_normal:
         return ret_val;
 }
